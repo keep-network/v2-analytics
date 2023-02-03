@@ -1,10 +1,12 @@
 const Web3 = require('web3')
 const web3 = new Web3(process.env.MAINNET_ENDPOINT)
 const axios = require('axios')
+const { read, write } = require('./storage')
 
 const bridgeABI = require('./contracts/bridge.json')
 
 const contract = new web3.eth.Contract(bridgeABI, "0x5e4861a80b55f035d899f66772117f00fa0e8e7b")
+
 
 Array.prototype.total = function() {
   let total = 0
@@ -41,28 +43,39 @@ let amounts = []
 contract.events.DepositRevealed({
     filter: {},
     fromBlock: 16523905
-}).on('data', function(e){
+}).on('data', async function(e){
   const amount = Number(e.returnValues.amount)
   amounts.push(amount)
-  const z = amounts.zScore(amount)
-  if (z >= 2) {
-    const btc = (amount / divisor).toFixed(2)
-    const payload = {
-      content: `[${btc}](https://etherscan.io/tx/${e.transactionHash}) BTC to `+
-        `[${e.returnValues.depositor}](https://etherscan.io/address/${e.returnValues.depositor})`
-    }
 
-    axios({
-      method: 'post',
-      url: process.env.WEBHOOK_URL,
-      data: payload
-    }).then(function (response) {
-        console.log(`${btc} BTC to ${e.returnValues.depositor}`)
-      })
-      .catch(function (error) {
-        console.log(error);
-      })
+  const btc = (amount / divisor).toFixed(2)
+  console.log(`${btc} BTC to ${e.returnValues.depositor}`)
+
+  if (await read(e.transactionHash)) {
+    return
   }
+
+  const z = amounts.zScore(amount)
+  if (z < 2) {
+    return
+  }
+
+  write(e.transactionHash, true)
+
+  const payload = {
+    content: `[${btc}](https://etherscan.io/tx/${e.transactionHash}) BTC to `+
+      `[${e.returnValues.depositor}](https://etherscan.io/address/${e.returnValues.depositor})`
+  }
+
+  axios({
+    method: 'post',
+    url: process.env.WEBHOOK_URL,
+    data: payload
+  }).then(function (response) {
+    })
+    .catch(function (error) {
+      console.log(error);
+    })
+
 }).on('changed', function(event){
     // remove event from local database
 }).on('error', console.error);
